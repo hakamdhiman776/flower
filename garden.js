@@ -19,31 +19,12 @@
     const MAX_FLOWERS = 200;
     const SPRITE_BASE = 64;
 
-    // Bouquet composition: heads sit in the upper third, stems rise from a
-    // narrow base roughly 4/5 down the viewport.
+    // Stems rise from a narrow base roughly 4/5 down the viewport.
     const BOUQUET = {
         baseY: 0.81,
-        headTop: 0.285,
-        headBottom: 0.345,
-        clickSpread: 0.36,
         baseSpreadDesktop: 0.075,
         baseSpreadMobile: 0.055,
-        edgeDesktop: 0.1,
-        edgeMobile: 0.16,
     };
-
-    // Wide fan slots, filled nearest-to-click first and avoiding occupied
-    // heads so repeated taps spread the bouquet instead of stacking.
-    const SLOTS_DESKTOP = [
-        0.5, 0.32, 0.68, 0.16, 0.84, 0.4, 0.6, 0.24, 0.76,
-        0.46, 0.54, 0.1, 0.9, 0.36, 0.64, 0.2, 0.8, 0.28, 0.72, 0.44, 0.56,
-    ];
-    const SLOTS_MOBILE = [
-        0.5, 0.3, 0.7, 0.16, 0.84, 0.4, 0.6, 0.22, 0.78,
-        0.46, 0.54, 0.15, 0.85, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82,
-    ];
-    // Slight height differences keep neighbouring heads from colliding.
-    const HEAD_Y_OFFSETS = [0.018, -0.014, 0.008, -0.022, 0.014, -0.006, 0.022, -0.018, 0.004, -0.01, 0.02, -0.024, 0.012];
 
     const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
     const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
@@ -406,7 +387,6 @@
         plant(x, y) {
             const compact = this.w < 640;
             const centerX = this.w / 2;
-            const baseY = this.h * BOUQUET.baseY;
             const baseSpread = this.w * (compact ? BOUQUET.baseSpreadMobile : BOUQUET.baseSpreadDesktop);
             const baseX = centerX + rand(-1, 1) * baseSpread;
 
@@ -416,40 +396,15 @@
             const kind = FLOWER_KINDS[seq % FLOWER_KINDS.length];
             this.flowerSequenceIndex++;
 
-            // Map the click into the bouquet's head band, then pick the
-            // widest available slot nearest to it. Repeated center clicks
-            // fan outward instead of stacking on top of each other.
-            const clickNorm = clamp01(x / this.w) * 2 - 1;
-            const edge = compact ? BOUQUET.edgeMobile : BOUQUET.edgeDesktop;
-            const desired = Math.min(1 - edge, Math.max(edge, 0.5 + clickNorm * BOUQUET.clickSpread));
-            const slots = compact ? SLOTS_MOBILE : SLOTS_DESKTOP;
-            const minGap = this.w * (compact ? 0.16 : 0.08);
-            const activeHeads = [];
-            for (const q of this.flowers) if (q.active) activeHeads.push(q.tx);
+            // Bloom exactly where the pointer touched (tiny jitter keeps
+            // repeated taps organic), clamped away from the edges.
+            const marginX = this.w * (compact ? 0.09 : 0.06);
+            const headX = Math.min(this.w - marginX, Math.max(marginX, x + rand(-6, 6)));
+            const headY = Math.min(this.h * 0.86, Math.max(this.h * 0.08, y + rand(-6, 6)));
 
-            let chosenNorm = desired;
-            let bestScore = -Infinity;
-            for (let si = 0; si < slots.length; si++) {
-                const candidate = Math.min(1 - edge, Math.max(edge, slots[si]));
-                const clickDist = Math.abs(candidate - desired) * this.w;
-                let nearest = Infinity;
-                for (const ax of activeHeads) {
-                    const d = Math.abs(ax - candidate * this.w);
-                    if (d < nearest) nearest = d;
-                }
-                const overlap = nearest < minGap ? (minGap - nearest) * 24 : 0;
-                const score = -clickDist - overlap;
-                if (score > bestScore) {
-                    bestScore = score;
-                    chosenNorm = candidate;
-                }
-            }
-            let headNorm = Math.min(1 - edge, Math.max(edge, chosenNorm + rand(-0.01, 0.01)));
-            const headX = headNorm * this.w;
-            let headYNorm = BOUQUET.headTop + clamp01(y / this.h) * (BOUQUET.headBottom - BOUQUET.headTop);
-            headYNorm += HEAD_Y_OFFSETS[seq % HEAD_Y_OFFSETS.length];
-            headYNorm = Math.min(BOUQUET.headBottom, Math.max(BOUQUET.headTop, headYNorm));
-            const headY = headYNorm * this.h + rand(-2, 2);
+            // Stems rise from the lower part of the scene; if the touch is
+            // very low, drop the base further so the stem still grows upward.
+            const baseY = Math.min(this.h * 0.98, Math.max(this.h * BOUQUET.baseY, headY + this.h * 0.12));
 
             const bow = rand(-1, 1) * Math.min(24, this.w * 0.02);
             const midX = baseX + (headX - baseX) * rand(0.3, 0.62) + bow;
