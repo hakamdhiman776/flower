@@ -15,7 +15,19 @@
         glow: "#ff2a4a",
     };
 
-    const FLOWER_KINDS = ["daisy", "rose", "tulip", "sunflower"];
+    const WHITE_PALETTE = {
+        id: "pure-white",
+        petal: "#ffffff",
+        petalDark: "#ccd8ea",
+        petalLight: "#ffffff",
+        glow: "#eaf3ff",
+    };
+
+    const FLOWER_KINDS = [
+        "daisy", "rose", "tulip", "sunflower",
+        "lily", "orchid", "lotus", "poppy",
+        "jasmine", "magnolia",
+    ];
     const MAX_FLOWERS = 200;
     const SPRITE_BASE = 64;
 
@@ -139,7 +151,8 @@
 
         headSprite(kind, pal) {
             const isRose = kind === "rose";
-            const activePal = isRose ? ROSE_PALETTE : pal;
+            const isWhite = kind === "jasmine" || kind === "magnolia";
+            const activePal = isRose ? ROSE_PALETTE : isWhite ? WHITE_PALETTE : pal;
             const half = SPRITE_BASE * 2.9;
 
             return this.sprite(`h:${kind}:${activePal.id}`, (x) => {
@@ -156,6 +169,12 @@
                 if (kind === "tulip") this.paintTulip(x, s, activePal);
                 else if (kind === "daisy") this.paintDaisy(x, s, activePal);
                 else if (kind === "rose") this.paintRose(x, s, activePal);
+                else if (kind === "lily") this.paintLily(x, s, activePal);
+                else if (kind === "orchid") this.paintOrchid(x, s, activePal);
+                else if (kind === "lotus") this.paintLotus(x, s, activePal);
+                else if (kind === "poppy") this.paintPoppy(x, s, activePal);
+                else if (kind === "jasmine") this.paintJasmine(x, s, activePal);
+                else if (kind === "magnolia") this.paintMagnolia(x, s, activePal);
                 else this.paintSunflower(x, s, activePal);
             }, half);
         }
@@ -353,6 +372,280 @@
             }
         }
 
+        paintLily(ctx, s, pal) {
+            ctx.shadowColor = hexA(pal.glow, 0.85);
+            ctx.shadowBlur = 22;
+            const n = 6;
+            for (let i = 0; i < n; i++) {
+                const a = (i / n) * Math.PI * 2;
+                ctx.save();
+                ctx.rotate(a);
+                const len = s * 1.28;
+                const g = ctx.createLinearGradient(0, 0, 0, -len);
+                g.addColorStop(0, pal.petalDark);
+                g.addColorStop(0.55, pal.petal);
+                g.addColorStop(1, pal.petalLight);
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.bezierCurveTo(s * 0.44, -len * 0.32, s * 0.3, -len * 0.8, 0, -len);
+                ctx.bezierCurveTo(-s * 0.3, -len * 0.8, -s * 0.44, -len * 0.32, 0, 0);
+                ctx.fill();
+                ctx.strokeStyle = hexA("#ffffff", 0.3);
+                ctx.lineWidth = 0.8;
+                ctx.beginPath();
+                ctx.moveTo(0, -len * 0.12);
+                ctx.lineTo(0, -len * 0.88);
+                ctx.stroke();
+                ctx.restore();
+            }
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = hexA(pal.glow, 0.6);
+            const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 0.26);
+            cg.addColorStop(0, "#fff6c0");
+            cg.addColorStop(1, "#e0a12c");
+            ctx.fillStyle = cg;
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 0.24, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.lineCap = "round";
+            for (let i = 0; i < 7; i++) {
+                const a = (i / 7) * Math.PI * 2;
+                ctx.strokeStyle = "rgba(255,236,170,0.75)";
+                ctx.lineWidth = s * 0.03;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(Math.cos(a) * s * 0.38, Math.sin(a) * s * 0.38);
+                ctx.stroke();
+                ctx.fillStyle = "#ffd772";
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * s * 0.38, Math.sin(a) * s * 0.38, s * 0.035, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        paintOrchid(ctx, s, pal) {
+            ctx.shadowColor = hexA(pal.glow, 0.8);
+            ctx.shadowBlur = 20;
+            for (let i = 0; i < 5; i++) {
+                const a = -Math.PI / 2 + i * ((Math.PI * 2) / 5);
+                ctx.save();
+                ctx.rotate(a);
+                const len = s * 1.2;
+                const g = ctx.createRadialGradient(0, -len * 0.5, 0, 0, -len * 0.5, len * 0.8);
+                g.addColorStop(0, pal.petalDark);
+                g.addColorStop(0.6, pal.petal);
+                g.addColorStop(1, pal.petalLight);
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.ellipse(0, -len * 0.55, len * 0.44, len * 0.62, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = hexA(pal.petalLight, 0.4);
+                ctx.lineWidth = 0.8;
+                ctx.stroke();
+                ctx.restore();
+            }
+            ctx.save();
+            ctx.rotate(Math.PI / 2);
+            const lip = s * 0.9;
+            const lg = ctx.createLinearGradient(0, 0, 0, lip);
+            lg.addColorStop(0, pal.petalLight);
+            lg.addColorStop(0.55, pal.petal);
+            lg.addColorStop(1, pal.petalDark);
+            ctx.fillStyle = lg;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.bezierCurveTo(s * 0.5, lip * 0.2, s * 0.42, lip * 0.95, 0, lip);
+            ctx.bezierCurveTo(-s * 0.42, lip * 0.95, -s * 0.5, lip * 0.2, 0, 0);
+            ctx.fill();
+            ctx.fillStyle = hexA("#ffe6a0", 0.75);
+            for (let i = 0; i < 4; i++) {
+                const t = (i + 0.5) / 5;
+                ctx.beginPath();
+                ctx.arc(rand(-s * 0.16, s * 0.16), lip * t * 0.8, s * 0.045, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.restore();
+            ctx.shadowBlur = 0;
+            const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 0.28);
+            cg.addColorStop(0, "#fff0b0");
+            cg.addColorStop(1, pal.petalDark);
+            ctx.fillStyle = cg;
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 0.22, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        paintLotus(ctx, s, pal) {
+            ctx.shadowColor = hexA(pal.glow, 0.85);
+            for (let layer = 0; layer < 3; layer++) {
+                const n = 8;
+                const len = s * (1.35 - layer * 0.26);
+                const wid = s * (0.4 - layer * 0.06);
+                const off = layer * (Math.PI / n);
+                ctx.shadowBlur = layer === 0 ? 24 : 10;
+                for (let i = 0; i < n; i++) {
+                    const a = (i / n) * Math.PI * 2 + off;
+                    ctx.save();
+                    ctx.rotate(a);
+                    const g = ctx.createLinearGradient(0, 0, 0, -len);
+                    g.addColorStop(0, pal.petalDark);
+                    g.addColorStop(0.5, pal.petal);
+                    g.addColorStop(1, pal.petalLight);
+                    ctx.fillStyle = g;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.bezierCurveTo(wid, -len * 0.35, wid * 0.7, -len * 0.82, 0, -len);
+                    ctx.bezierCurveTo(-wid * 0.7, -len * 0.82, -wid, -len * 0.35, 0, 0);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = hexA("#ffe27a", 0.8);
+            const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 0.24);
+            cg.addColorStop(0, "#fff6c0");
+            cg.addColorStop(1, "#e8b93a");
+            ctx.fillStyle = cg;
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 0.22, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        paintPoppy(ctx, s, pal) {
+            ctx.shadowColor = hexA(pal.glow, 0.9);
+            ctx.shadowBlur = 24;
+            for (let i = 0; i < 4; i++) {
+                const a = (i / 4) * Math.PI * 2 + 0.5;
+                ctx.save();
+                ctx.rotate(a);
+                const r = s * 1.08;
+                const g = ctx.createRadialGradient(0, -r * 0.35, 0, 0, -r * 0.35, r);
+                g.addColorStop(0, pal.petalLight);
+                g.addColorStop(0.45, pal.petal);
+                g.addColorStop(1, pal.petalDark);
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.bezierCurveTo(r * 0.75, -r * 0.1, r * 0.85, -r * 0.95, r * 0.05, -r * 1.02);
+                ctx.bezierCurveTo(-r * 0.8, -r * 0.98, -r * 0.75, -r * 0.05, 0, 0);
+                ctx.fill();
+                ctx.restore();
+            }
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = "rgba(0,0,0,0.5)";
+            const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 0.42);
+            cg.addColorStop(0, "#2b1608");
+            cg.addColorStop(0.7, "#140a04");
+            cg.addColorStop(1, "#060302");
+            ctx.fillStyle = cg;
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "rgba(255,224,140,0.28)";
+            for (let i = 0; i < 24; i++) {
+                const a = i * 2.399;
+                const rr = s * 0.38 * Math.sqrt(i / 24);
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr, s * 0.03, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        paintJasmine(ctx, s, pal) {
+            const cluster = [
+                { x: 0, y: -s * 0.15, r: 0.6 },
+                { x: -s * 0.52, y: s * 0.22, r: 0.46 },
+                { x: s * 0.52, y: s * 0.18, r: 0.46 },
+                { x: -s * 0.2, y: s * 0.64, r: 0.4 },
+                { x: s * 0.22, y: s * 0.6, r: 0.42 },
+                { x: 0, y: -s * 0.72, r: 0.34 },
+            ];
+            for (const c of cluster) {
+                ctx.save();
+                ctx.translate(c.x, c.y);
+                const r = s * c.r;
+                ctx.shadowColor = hexA(pal.glow, 0.95);
+                ctx.shadowBlur = 15;
+                const petals = 5;
+                for (let i = 0; i < petals; i++) {
+                    const a = (i / petals) * Math.PI * 2 - Math.PI / 2;
+                    ctx.save();
+                    ctx.rotate(a);
+                    const g = ctx.createLinearGradient(0, 0, 0, -r);
+                    g.addColorStop(0, "#e8f0ff");
+                    g.addColorStop(0.5, "#ffffff");
+                    g.addColorStop(1, "#ffffff");
+                    ctx.fillStyle = g;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.bezierCurveTo(r * 0.34, -r * 0.34, r * 0.26, -r * 0.8, 0, -r);
+                    ctx.bezierCurveTo(-r * 0.26, -r * 0.8, -r * 0.34, -r * 0.34, 0, 0);
+                    ctx.fill();
+                    ctx.restore();
+                }
+                ctx.shadowBlur = 6;
+                ctx.shadowColor = "rgba(255,220,120,0.9)";
+                ctx.fillStyle = "#ffe9a3";
+                ctx.beginPath();
+                ctx.arc(0, 0, r * 0.18, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        paintMagnolia(ctx, s, pal) {
+            ctx.shadowColor = hexA(pal.glow, 0.9);
+            const n = 7;
+            for (let layer = 0; layer < 2; layer++) {
+                const len = s * (layer === 0 ? 1.45 : 1.02);
+                const wid = s * (layer === 0 ? 0.6 : 0.46);
+                const off = layer * (Math.PI / n);
+                ctx.shadowBlur = layer === 0 ? 26 : 12;
+                for (let i = 0; i < n; i++) {
+                    const a = (i / n) * Math.PI * 2 + off;
+                    ctx.save();
+                    ctx.rotate(a);
+                    const g = ctx.createLinearGradient(0, 0, 0, -len);
+                    g.addColorStop(0, "#f2dcd6");
+                    g.addColorStop(0.32, "#ffffff");
+                    g.addColorStop(1, "#ffffff");
+                    ctx.fillStyle = g;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.bezierCurveTo(wid, -len * 0.28, wid * 0.72, -len * 0.78, 0, -len);
+                    ctx.bezierCurveTo(-wid * 0.72, -len * 0.78, -wid, -len * 0.28, 0, 0);
+                    ctx.fill();
+                    ctx.strokeStyle = "rgba(208,220,238,0.5)";
+                    ctx.lineWidth = 0.9;
+                    ctx.stroke();
+                    ctx.restore();
+                }
+            }
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "rgba(255,220,140,0.85)";
+            const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 0.34);
+            cg.addColorStop(0, "#fff4c4");
+            cg.addColorStop(0.6, "#f0cf7a");
+            cg.addColorStop(1, "#c99b3a");
+            ctx.fillStyle = cg;
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "rgba(150,100,20,0.28)";
+            for (let i = 0; i < 20; i++) {
+                const a = i * 2.399;
+                const rr = s * 0.27 * Math.sqrt(i / 20);
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * rr, Math.sin(a) * rr, s * 0.03, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
         spawn() {
             for (let i = 0; i < this.particles.length; i++) {
                 const p = this.particles[i];
@@ -431,7 +724,16 @@
             f.kind = kind;
             f.pal = pal;
             const sizeScale = (compact ? 0.84 : 1) * rand(0.94, 1.06);
-            f.size = (kind === "sunflower" ? rand(26, 34) : kind === "rose" ? rand(26, 32) : kind === "tulip" ? rand(24, 30) : rand(24, 32)) * sizeScale;
+            const baseSize = kind === "sunflower" ? rand(26, 34)
+                : kind === "rose" ? rand(26, 32)
+                : kind === "tulip" ? rand(24, 30)
+                : kind === "lotus" ? rand(28, 36)
+                : kind === "orchid" ? rand(22, 28)
+                : kind === "poppy" ? rand(26, 34)
+                : kind === "jasmine" ? rand(24, 30)
+                : kind === "magnolia" ? rand(30, 38)
+                : rand(24, 32);
+            f.size = baseSize * sizeScale;
             f.swayPh = Math.random() * Math.PI * 2;
             f.swayAmp = rand(0.012, 0.03);
             f.spin = rand(-0.08, 0.08);
