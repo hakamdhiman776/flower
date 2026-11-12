@@ -69,8 +69,36 @@
             this.plantedTotal = 0;
             this.flowerSequenceIndex = 0;
 
+            // Gyroscope / device-tilt camera parallax.
+            this.tiltX = 0;
+            this.tiltY = 0;
+            this.camX = 0;
+            this.camY = 0;
+            this.gyroBase = null;
+            this.gyroBound = false;
+
             for (let i = 0; i < 1400; i++) this.particles.push(this.blankParticle());
             this.resize();
+        }
+
+        bindGyro() {
+            if (this.gyroBound) return;
+            this.gyroBound = true;
+            window.addEventListener("deviceorientation", (e) => this.onOrient(e));
+        }
+
+        onOrient(e) {
+            if (e.gamma == null || e.beta == null) return;
+            if (!this.gyroBase) {
+                this.gyroBase = { beta: e.beta, gamma: e.gamma };
+                return;
+            }
+            // Very sensitive: ~8 degrees of tilt already swings the whole scene.
+            const fullTilt = 8;
+            const dGamma = e.gamma - this.gyroBase.gamma;
+            const dBeta = e.beta - this.gyroBase.beta;
+            this.tiltX = Math.max(-1, Math.min(1, dGamma / fullTilt));
+            this.tiltY = Math.max(-1, Math.min(1, dBeta / fullTilt));
         }
 
         blankParticle() {
@@ -655,6 +683,8 @@
         }
 
         trail(x, y) {
+            x -= this.camX;
+            y -= this.camY;
             const now = performance.now();
             if (now - this.lastSpark < 26) return;
             this.lastSpark = now;
@@ -678,6 +708,11 @@
         }
 
         plant(x, y) {
+            // The world is translated by the gyro camera, so convert the
+            // screen-space touch back into world space.
+            x -= this.camX;
+            y -= this.camY;
+
             const compact = this.w < 640;
             const centerX = this.w / 2;
             const baseSpread = this.w * (compact ? BOUQUET.baseSpreadMobile : BOUQUET.baseSpreadDesktop);
@@ -801,9 +836,27 @@
             const now = performance.now();
             const time = (now - this.t0) / 1000;
 
+            // Ease the camera toward the current tilt. A tiny tilt already
+            // swings the whole scene far, so this feels very responsive.
+            const targetX = this.tiltX * this.w * 0.2;
+            const targetY = this.tiltY * this.h * 0.2;
+            this.camX += (targetX - this.camX) * 0.16;
+            this.camY += (targetY - this.camY) * 0.16;
+
             ctx.setTransform(1, 0, 0, 1, 0, 0);
-            ctx.drawImage(this.bg, 0, 0);
+
+            // Background parallaxes slightly and is scaled up so the shifted
+            // edges never show empty space.
+            const bgScale = 1.2;
+            const bw = this.w * bgScale * this.dpr;
+            const bh = this.h * bgScale * this.dpr;
+            const bx = (this.canvas.width - bw) / 2 + this.camX * 0.4 * this.dpr;
+            const by = (this.canvas.height - bh) / 2 + this.camY * 0.4 * this.dpr;
+            ctx.drawImage(this.bg, bx, by, bw, bh);
+
             ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+            ctx.save();
+            ctx.translate(this.camX, this.camY);
 
             for (const f of this.flowers) {
                 if (!f.active) continue;
@@ -811,6 +864,7 @@
             }
 
             this.drawParticles(ctx);
+            ctx.restore();
         }
 
         drawParticles(ctx) {
@@ -847,10 +901,11 @@
                     ctx.drawImage(img, p.x - r, p.y - r, r * 2, r * 2);
                 } else {
                     const r = p.size * (1 - k * 0.4) * 1.9;
+                    ctx.save();
                     ctx.translate(p.x, p.y);
                     ctx.rotate(p.rot);
                     ctx.drawImage(petal, -r, -r * 0.6, r * 2, r * 1.2);
-                    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+                    ctx.restore();
                 }
             }
             ctx.restore();
@@ -948,6 +1003,20 @@
 
     engine.start();
 
+    // Enable tilt/gyro parallax. iOS needs an explicit permission that must be
+    // requested from a user gesture, so we also try again on first tap.
+    const enableGyro = () => {
+        if (typeof DeviceOrientationEvent === "undefined") return;
+        if (typeof DeviceOrientationEvent.requestPermission === "function") {
+            DeviceOrientationEvent.requestPermission()
+                .then((res) => { if (res === "granted") engine.bindGyro(); })
+                .catch(() => {});
+        } else {
+            engine.bindGyro();
+        }
+    };
+    enableGyro();
+
     window.addEventListener("resize", () => {
         engine.resize();
     });
@@ -977,6 +1046,7 @@
     });
 
     canvas.addEventListener("pointerdown", (e) => {
+        enableGyro();
         const p = getPos(e);
         engine.plant(p.x, p.y);
     });
