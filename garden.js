@@ -1,0 +1,726 @@
+(function () {
+    "use strict";
+
+    const PALETTES = [
+        { id: "blush", petal: "#f4849f", petalDark: "#c9426a", petalLight: "#ffd0dd", glow: "#ff7fa5" },
+        { id: "crimson", petal: "#f2465c", petalDark: "#a4102a", petalLight: "#ffb0b9", glow: "#ff4d63" },
+        { id: "violet", petal: "#b06bd8", petalDark: "#6d2f96", petalLight: "#e6c4f7", glow: "#c07ce8" },
+    ];
+
+    const ROSE_PALETTE = {
+        id: "true-red",
+        petal: "#e61938",
+        petalDark: "#8f091c",
+        petalLight: "#ff667d",
+        glow: "#ff2a4a",
+    };
+
+    const FLOWER_KINDS = ["daisy", "rose", "tulip", "sunflower"];
+    const MAX_FLOWERS = 200;
+    const SPRITE_BASE = 64;
+
+    // Bouquet composition: heads sit in the upper third, stems rise from a
+    // narrow base roughly 4/5 down the viewport.
+    const BOUQUET = {
+        baseY: 0.81,
+        headTop: 0.285,
+        headBottom: 0.345,
+        clickSpread: 0.36,
+        baseSpreadDesktop: 0.075,
+        baseSpreadMobile: 0.055,
+        edgeDesktop: 0.1,
+        edgeMobile: 0.16,
+    };
+
+    // Wide fan slots, filled nearest-to-click first and avoiding occupied
+    // heads so repeated taps spread the bouquet instead of stacking.
+    const SLOTS_DESKTOP = [
+        0.5, 0.32, 0.68, 0.16, 0.84, 0.4, 0.6, 0.24, 0.76,
+        0.46, 0.54, 0.1, 0.9, 0.36, 0.64, 0.2, 0.8, 0.28, 0.72, 0.44, 0.56,
+    ];
+    const SLOTS_MOBILE = [
+        0.5, 0.3, 0.7, 0.16, 0.84, 0.4, 0.6, 0.22, 0.78,
+        0.46, 0.54, 0.15, 0.85, 0.34, 0.66, 0.26, 0.74, 0.18, 0.82,
+    ];
+    // Slight height differences keep neighbouring heads from colliding.
+    const HEAD_Y_OFFSETS = [0.018, -0.014, 0.008, -0.022, 0.014, -0.006, 0.022, -0.018, 0.004, -0.01, 0.02, -0.024, 0.012];
+
+    const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+    const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+    const easeOutBack = (t) => {
+        const c1 = 1.70158;
+        const c3 = c1 + 1;
+        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+    };
+    const rand = (a, b) => a + Math.random() * (b - a);
+
+    const hexA = (hex, a) => {
+        const n = parseInt(hex.slice(1), 16);
+        return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+    };
+
+    class GardenEngine {
+        constructor(canvas) {
+            this.canvas = canvas;
+            this.ctx = canvas.getContext("2d", { alpha: false });
+            this.w = 0;
+            this.h = 0;
+            this.dpr = 1;
+            this.sprites = new Map();
+            this.particles = [];
+            this.flowers = [];
+            this.raf = 0;
+            this.t0 = performance.now();
+            this.lastSpark = 0;
+            this.paletteIndex = 0;
+            this.plantedTotal = 0;
+            this.flowerSequenceIndex = 0;
+
+            for (let i = 0; i < 1400; i++) this.particles.push(this.blankParticle());
+            this.resize();
+        }
+
+        blankParticle() {
+            return {
+                x: 0, y: 0, vx: 0, vy: 0, life: 0, maxLife: 0,
+                size: 0, rot: 0, vr: 0, spark: true, tint: 0, active: false,
+            };
+        }
+
+        setPalette(i) {
+            this.paletteIndex = i % PALETTES.length;
+        }
+
+        resize() {
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            this.dpr = dpr;
+            const rect = this.canvas.getBoundingClientRect();
+            this.w = Math.max(1, rect.width);
+            this.h = Math.max(1, rect.height);
+            this.canvas.width = Math.floor(this.w * dpr);
+            this.canvas.height = Math.floor(this.h * dpr);
+            this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            this.buildBackground();
+        }
+
+        buildBackground() {
+            const c = document.createElement("canvas");
+            c.width = Math.floor(this.w * this.dpr);
+            c.height = Math.floor(this.h * this.dpr);
+            const x = c.getContext("2d");
+            x.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+            const g = x.createRadialGradient(
+                this.w * 0.5, this.h * 0.52, 0,
+                this.w * 0.5, this.h * 0.52, Math.max(this.w, this.h) * 0.78,
+            );
+            g.addColorStop(0, "#2a1418");
+            g.addColorStop(0.45, "#1b0d11");
+            g.addColorStop(1, "#080406");
+            x.fillStyle = g;
+            x.fillRect(0, 0, this.w, this.h);
+
+            const n = Math.round((this.w * this.h) / 5200);
+            for (let i = 0; i < n; i++) {
+                const sx = Math.random() * this.w;
+                const sy = Math.random() * this.h;
+                const r = rand(0.4, 1.7);
+                const a = rand(0.25, 0.85);
+                x.globalAlpha = a;
+                x.fillStyle = "#fff6ee";
+                x.beginPath();
+                x.arc(sx, sy, r, 0, Math.PI * 2);
+                x.fill();
+                if (r > 1.25) {
+                    x.globalAlpha = a * 0.14;
+                    x.beginPath();
+                    x.arc(sx, sy, r * 4.5, 0, Math.PI * 2);
+                    x.fill();
+                }
+            }
+            x.globalAlpha = 1;
+            this.bg = c;
+        }
+
+        sprite(key, draw, half) {
+            const cached = this.sprites.get(key);
+            if (cached) return cached;
+            const size = Math.ceil(half * 2 * this.dpr);
+            const c = document.createElement("canvas");
+            c.width = size;
+            c.height = size;
+            const x = c.getContext("2d");
+            x.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+            x.translate(half, half);
+            draw(x, half);
+            this.sprites.set(key, c);
+            return c;
+        }
+
+        headSprite(kind, pal) {
+            const isRose = kind === "rose";
+            const activePal = isRose ? ROSE_PALETTE : pal;
+            const half = SPRITE_BASE * 2.9;
+
+            return this.sprite(`h:${kind}:${activePal.id}`, (x) => {
+                const s = SPRITE_BASE;
+                const halo = x.createRadialGradient(0, 0, 0, 0, 0, s * 2.7);
+                halo.addColorStop(0, hexA(activePal.glow, 0.34));
+                halo.addColorStop(0.45, hexA(activePal.glow, 0.12));
+                halo.addColorStop(1, hexA(activePal.glow, 0));
+                x.fillStyle = halo;
+                x.beginPath();
+                x.arc(0, 0, s * 2.7, 0, Math.PI * 2);
+                x.fill();
+
+                if (kind === "tulip") this.paintTulip(x, s, activePal);
+                else if (kind === "daisy") this.paintDaisy(x, s, activePal);
+                else if (kind === "rose") this.paintRose(x, s, activePal);
+                else this.paintSunflower(x, s, activePal);
+            }, half);
+        }
+
+        sparkSprite(color) {
+            const half = 16;
+            return this.sprite(`s:${color}`, (x) => {
+                const g = x.createRadialGradient(0, 0, 0, 0, 0, half);
+                g.addColorStop(0, hexA(color, 1));
+                g.addColorStop(0.35, hexA(color, 0.55));
+                g.addColorStop(1, hexA(color, 0));
+                x.fillStyle = g;
+                x.beginPath();
+                x.arc(0, 0, half, 0, Math.PI * 2);
+                x.fill();
+            }, half);
+        }
+
+        petalSprite(color, light) {
+            const half = 22;
+            return this.sprite(`p:${color}:${light}`, (x) => {
+                const g = x.createLinearGradient(-half * 0.8, 0, half * 0.8, 0);
+                g.addColorStop(0, hexA(light, 0.95));
+                g.addColorStop(1, hexA(color, 0.75));
+                x.fillStyle = g;
+                x.shadowColor = hexA(color, 0.9);
+                x.shadowBlur = 10;
+                x.beginPath();
+                x.ellipse(0, 0, half * 0.72, half * 0.34, 0, 0, Math.PI * 2);
+                x.fill();
+            }, half);
+        }
+
+        paintRose(ctx, s, pal) {
+            ctx.shadowColor = hexA(pal.glow, 0.8);
+            ctx.shadowBlur = 15;
+
+            const n = 28;
+            for (let i = n; i > 0; i--) {
+                const angle = i * 2.39996;
+                const r = s * 1.35 * Math.pow(i / n, 0.55);
+
+                ctx.save();
+                ctx.rotate(angle);
+
+                const g = ctx.createRadialGradient(0, -r * 0.2, 0, 0, -r * 0.6, r);
+                g.addColorStop(0, pal.petalDark);
+                g.addColorStop(0.6, pal.petal);
+                g.addColorStop(1, pal.petalLight);
+
+                ctx.fillStyle = g;
+
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.bezierCurveTo(r * 0.75, -r * 0.1, r * 0.9, -r * 0.85, 0, -r);
+                ctx.bezierCurveTo(-r * 0.9, -r * 0.85, -r * 0.75, -r * 0.1, 0, 0);
+                ctx.fill();
+
+                ctx.strokeStyle = hexA(pal.petalLight, 0.5);
+                ctx.lineWidth = 0.8;
+                ctx.stroke();
+
+                ctx.restore();
+            }
+            ctx.shadowBlur = 0;
+        }
+
+        paintTulip(ctx, s, pal) {
+            ctx.shadowColor = hexA(pal.glow, 0.85);
+            ctx.shadowBlur = 25;
+
+            const bodyGrad = ctx.createLinearGradient(-s * 0.6, -s * 1.2, s * 0.6, s * 0.2);
+            bodyGrad.addColorStop(0, pal.petalLight);
+            bodyGrad.addColorStop(0.5, pal.petal);
+            bodyGrad.addColorStop(1, pal.petalDark);
+
+            ctx.fillStyle = bodyGrad;
+            ctx.beginPath();
+            ctx.moveTo(0, s * 0.45);
+            ctx.bezierCurveTo(-s * 0.75, s * 0.2, -s * 0.85, -s * 0.6, -s * 0.55, -s * 1.15);
+            ctx.quadraticCurveTo(-s * 0.25, -s * 1.35, 0, -s * 1.05);
+            ctx.quadraticCurveTo(s * 0.25, -s * 1.35, s * 0.55, -s * 1.15);
+            ctx.bezierCurveTo(s * 0.85, -s * 0.6, s * 0.75, s * 0.2, 0, s * 0.45);
+            ctx.fill();
+
+            const frontGrad = ctx.createLinearGradient(-s * 0.4, -s * 0.8, s * 0.4, s * 0.4);
+            frontGrad.addColorStop(0, pal.petalLight);
+            frontGrad.addColorStop(1, pal.petalDark);
+
+            ctx.fillStyle = frontGrad;
+            ctx.beginPath();
+            ctx.moveTo(0, s * 0.45);
+            ctx.bezierCurveTo(-s * 0.5, s * 0.2, -s * 0.55, -s * 0.5, -s * 0.35, -s * 0.95);
+            ctx.quadraticCurveTo(0, -s * 1.15, s * 0.35, -s * 0.95);
+            ctx.bezierCurveTo(s * 0.55, -s * 0.5, s * 0.5, s * 0.2, 0, s * 0.45);
+            ctx.fill();
+
+            ctx.strokeStyle = hexA("#ffffff", 0.45);
+            ctx.lineWidth = s * 0.04;
+            ctx.lineCap = "round";
+            ctx.beginPath();
+            ctx.moveTo(-s * 0.3, -s * 0.7);
+            ctx.quadraticCurveTo(-s * 0.45, -s * 0.2, -s * 0.2, s * 0.15);
+            ctx.stroke();
+
+            ctx.shadowBlur = 0;
+        }
+
+        paintDaisy(ctx, s, pal) {
+            const n = 12;
+            for (let layer = 0; layer < 2; layer++) {
+                const len = s * (layer === 0 ? 1.28 : 1.02);
+                const wid = s * (layer === 0 ? 0.3 : 0.24);
+                ctx.shadowColor = layer === 0 ? "rgba(255,255,255,0.9)" : hexA(pal.glow, 0.6);
+                ctx.shadowBlur = layer === 0 ? 16 : 8;
+                for (let i = 0; i < n; i++) {
+                    const a = (i / n) * Math.PI * 2 + layer * (Math.PI / n);
+                    ctx.save();
+                    ctx.rotate(a);
+                    const g = ctx.createLinearGradient(0, 0, 0, -len);
+                    g.addColorStop(0, hexA(pal.petalLight, 0.9));
+                    g.addColorStop(0.45, "rgba(255,252,253,0.96)");
+                    g.addColorStop(1, "#ffffff");
+                    ctx.fillStyle = g;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.bezierCurveTo(wid, -len * 0.4, wid * 0.8, -len * 0.9, 0, -len);
+                    ctx.bezierCurveTo(-wid * 0.8, -len * 0.9, -wid, -len * 0.4, 0, 0);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
+            ctx.shadowColor = hexA(pal.glow, 0.9);
+            ctx.shadowBlur = 16;
+            const c = ctx.createRadialGradient(-s * 0.08, -s * 0.08, 0, 0, 0, s * 0.36);
+            c.addColorStop(0, "#fff6c0");
+            c.addColorStop(0.5, "#ffdc6a");
+            c.addColorStop(1, "#d9971f");
+            ctx.fillStyle = c;
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 0.36, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "rgba(120,72,10,0.35)";
+            for (let i = 0; i < 22; i++) {
+                const a = i * 2.399;
+                const r = s * 0.34 * Math.sqrt(i / 22);
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * r, Math.sin(a) * r, s * 0.028, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        paintSunflower(ctx, s, pal) {
+            const n = 18;
+            for (let ring = 0; ring < 2; ring++) {
+                const len = s * (ring === 0 ? 1.36 : 1.06);
+                ctx.shadowColor = "rgba(255,206,72,0.9)";
+                ctx.shadowBlur = ring === 0 ? 26 : 12;
+                for (let i = 0; i < n; i++) {
+                    const a = (i / n) * Math.PI * 2 + ring * (Math.PI / n);
+                    ctx.save();
+                    ctx.rotate(a);
+                    const g = ctx.createLinearGradient(0, 0, 0, -len);
+                    g.addColorStop(0, "#e09a1c");
+                    g.addColorStop(0.5, "#f6c334");
+                    g.addColorStop(1, "#fff0a6");
+                    ctx.fillStyle = g;
+                    ctx.beginPath();
+                    ctx.moveTo(0, 0);
+                    ctx.bezierCurveTo(s * 0.24, -len * 0.42, s * 0.16, -len * 0.88, 0, -len);
+                    ctx.bezierCurveTo(-s * 0.16, -len * 0.88, -s * 0.24, -len * 0.42, 0, 0);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            }
+            ctx.shadowBlur = 12;
+            ctx.shadowColor = hexA(pal.glow, 0.4);
+            const c = ctx.createRadialGradient(-s * 0.1, -s * 0.1, 0, 0, 0, s * 0.47);
+            c.addColorStop(0, "#8a5716");
+            c.addColorStop(0.6, "#54300a");
+            c.addColorStop(1, "#2e1904");
+            ctx.fillStyle = c;
+            ctx.beginPath();
+            ctx.arc(0, 0, s * 0.47, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.fillStyle = "rgba(255,214,120,0.22)";
+            for (let i = 0; i < 60; i++) {
+                const a = i * 2.399;
+                const r = s * 0.45 * Math.sqrt(i / 60);
+                ctx.beginPath();
+                ctx.arc(Math.cos(a) * r, Math.sin(a) * r, s * 0.026, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        spawn() {
+            for (let i = 0; i < this.particles.length; i++) {
+                const p = this.particles[i];
+                if (!p.active) return p;
+            }
+            return null;
+        }
+
+        trail(x, y) {
+            const now = performance.now();
+            if (now - this.lastSpark < 26) return;
+            this.lastSpark = now;
+            const n = 1 + (Math.random() < 0.35 ? 1 : 0);
+            for (let i = 0; i < n; i++) {
+                const p = this.spawn();
+                if (!p) return;
+                p.active = true;
+                p.x = x + rand(-4, 4);
+                p.y = y + rand(-4, 4);
+                p.vx = rand(-0.18, 0.18);
+                p.vy = rand(-0.5, -0.12);
+                p.life = 0;
+                p.maxLife = rand(700, 1300);
+                p.size = rand(1.4, 3);
+                p.rot = 0;
+                p.vr = 0;
+                p.spark = true;
+                p.tint = Math.random() < 0.55 ? 0 : 1;
+            }
+        }
+
+        plant(x, y) {
+            const compact = this.w < 640;
+            const centerX = this.w / 2;
+            const baseY = this.h * BOUQUET.baseY;
+            const baseSpread = this.w * (compact ? BOUQUET.baseSpreadMobile : BOUQUET.baseSpreadDesktop);
+            const baseX = centerX + rand(-1, 1) * baseSpread;
+
+            const pal = PALETTES[this.paletteIndex];
+
+            const seq = this.flowerSequenceIndex;
+            const kind = FLOWER_KINDS[seq % FLOWER_KINDS.length];
+            this.flowerSequenceIndex++;
+
+            // Map the click into the bouquet's head band, then pick the
+            // widest available slot nearest to it. Repeated center clicks
+            // fan outward instead of stacking on top of each other.
+            const clickNorm = clamp01(x / this.w) * 2 - 1;
+            const edge = compact ? BOUQUET.edgeMobile : BOUQUET.edgeDesktop;
+            const desired = Math.min(1 - edge, Math.max(edge, 0.5 + clickNorm * BOUQUET.clickSpread));
+            const slots = compact ? SLOTS_MOBILE : SLOTS_DESKTOP;
+            const minGap = this.w * (compact ? 0.16 : 0.08);
+            const activeHeads = [];
+            for (const q of this.flowers) if (q.active) activeHeads.push(q.tx);
+
+            let chosenNorm = desired;
+            let bestScore = -Infinity;
+            for (let si = 0; si < slots.length; si++) {
+                const candidate = Math.min(1 - edge, Math.max(edge, slots[si]));
+                const clickDist = Math.abs(candidate - desired) * this.w;
+                let nearest = Infinity;
+                for (const ax of activeHeads) {
+                    const d = Math.abs(ax - candidate * this.w);
+                    if (d < nearest) nearest = d;
+                }
+                const overlap = nearest < minGap ? (minGap - nearest) * 24 : 0;
+                const score = -clickDist - overlap;
+                if (score > bestScore) {
+                    bestScore = score;
+                    chosenNorm = candidate;
+                }
+            }
+            let headNorm = Math.min(1 - edge, Math.max(edge, chosenNorm + rand(-0.01, 0.01)));
+            const headX = headNorm * this.w;
+            let headYNorm = BOUQUET.headTop + clamp01(y / this.h) * (BOUQUET.headBottom - BOUQUET.headTop);
+            headYNorm += HEAD_Y_OFFSETS[seq % HEAD_Y_OFFSETS.length];
+            headYNorm = Math.min(BOUQUET.headBottom, Math.max(BOUQUET.headTop, headYNorm));
+            const headY = headYNorm * this.h + rand(-2, 2);
+
+            const bow = rand(-1, 1) * Math.min(24, this.w * 0.02);
+            const midX = baseX + (headX - baseX) * rand(0.3, 0.62) + bow;
+            const midY = baseY + (headY - baseY) * rand(0.42, 0.62) + rand(-10, 10);
+
+            let f = this.flowers.find((q) => !q.active);
+            if (!f) {
+                f = {
+                    bx: 0, by: 0, tx: 0, ty: 0, cx: 0, cy: 0, born: 0, growDur: 0, bloomDur: 900,
+                    kind, pal, size: 0, leaves: [], swayPh: 0, swayAmp: 0, spin: 0, active: false,
+                };
+                this.flowers.push(f);
+            }
+            f.active = true;
+            f.bx = baseX;
+            f.by = baseY;
+            f.tx = headX;
+            f.ty = headY;
+            f.cx = midX;
+            f.cy = midY;
+            f.born = performance.now();
+            f.growDur = rand(1350, 1750);
+            f.bloomDur = 900;
+            f.kind = kind;
+            f.pal = pal;
+            const sizeScale = (compact ? 0.84 : 1) * rand(0.94, 1.06);
+            f.size = (kind === "sunflower" ? rand(26, 34) : kind === "rose" ? rand(26, 32) : kind === "tulip" ? rand(24, 30) : rand(24, 32)) * sizeScale;
+            f.swayPh = Math.random() * Math.PI * 2;
+            f.swayAmp = rand(0.012, 0.03);
+            f.spin = rand(-0.08, 0.08);
+
+            f.leaves.length = 0;
+            const ln = 1 + (Math.random() < 0.5 ? 1 : 0);
+            for (let i = 0; i < ln; i++) {
+                f.leaves.push({
+                    t: 0.24 + (i / ln) * 0.52 + rand(-0.05, 0.05),
+                    side: i % 2 === 0 ? 1 : -1,
+                    len: rand(28, 54) * (compact ? 0.88 : 1),
+                });
+            }
+
+            const activeList = [];
+            for (const q of this.flowers) if (q.active) activeList.push(q);
+            if (activeList.length > MAX_FLOWERS) {
+                activeList.sort((a, b) => a.born - b.born);
+                for (let i = 0; i < activeList.length - MAX_FLOWERS; i++) activeList[i].active = false;
+            }
+
+            for (let i = 0; i < 22; i++) {
+                const p = this.spawn();
+                if (!p) break;
+                const a = Math.random() * Math.PI * 2;
+                const sp = rand(0.4, 2.1);
+                p.active = true;
+                p.x = headX;
+                p.y = headY;
+                p.vx = Math.cos(a) * sp;
+                p.vy = Math.sin(a) * sp - 0.25;
+                p.life = 0;
+                p.maxLife = rand(900, 1900);
+                p.size = rand(2, 5);
+                p.rot = Math.random() * Math.PI;
+                p.vr = rand(-0.05, 0.05);
+                p.spark = false;
+                p.tint = 2;
+            }
+
+            this.plantedTotal++;
+            if (this.onPlant) this.onPlant(this.plantedTotal, x, y);
+        }
+
+        clear() {
+            for (const f of this.flowers) f.active = false;
+            for (const p of this.particles) p.active = false;
+            this.plantedTotal = 0;
+        }
+
+        start() {
+            const loop = () => {
+                this.frame();
+                this.raf = requestAnimationFrame(loop);
+            };
+            this.raf = requestAnimationFrame(loop);
+        }
+
+        stop() {
+            cancelAnimationFrame(this.raf);
+        }
+
+        frame() {
+            const ctx = this.ctx;
+            const now = performance.now();
+            const time = (now - this.t0) / 1000;
+
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+            ctx.drawImage(this.bg, 0, 0);
+            ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+
+            for (const f of this.flowers) {
+                if (!f.active) continue;
+                this.drawFlower(ctx, f, now, time);
+            }
+
+            this.drawParticles(ctx);
+        }
+
+        drawParticles(ctx) {
+            const pal = PALETTES[this.paletteIndex];
+            const sparkWhite = this.sparkSprite("#ffffff");
+            const sparkGlow = this.sparkSprite(pal.glow);
+            const petal = this.petalSprite(pal.petal, pal.petalLight);
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            for (let i = 0; i < this.particles.length; i++) {
+                const p = this.particles[i];
+                if (!p.active) continue;
+                p.life += 16.7;
+                if (p.life >= p.maxLife) {
+                    p.active = false;
+                    continue;
+                }
+                const k = p.life / p.maxLife;
+                p.x += p.vx;
+                p.y += p.vy;
+                if (!p.spark) {
+                    p.rot += p.vr;
+                    p.vy += 0.008;
+                    p.vx *= 0.985;
+                    p.vy *= 0.99;
+                } else {
+                    p.vy -= 0.002;
+                }
+                const alpha = k < 0.15 ? k / 0.15 : 1 - (k - 0.15) / 0.85;
+                ctx.globalAlpha = Math.max(0, alpha) * (p.spark ? 0.9 : 0.8);
+                if (p.spark) {
+                    const img = p.tint === 0 ? sparkWhite : sparkGlow;
+                    const r = p.size * (1 - k * 0.5) * 3.2;
+                    ctx.drawImage(img, p.x - r, p.y - r, r * 2, r * 2);
+                } else {
+                    const r = p.size * (1 - k * 0.4) * 1.9;
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate(p.rot);
+                    ctx.drawImage(petal, -r, -r * 0.6, r * 2, r * 1.2);
+                    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+                }
+            }
+            ctx.restore();
+            ctx.globalAlpha = 1;
+        }
+
+        bez(f, t, swayX) {
+            const mt = 1 - t;
+            const cx = f.cx + swayX * 0.6;
+            const tx = f.tx + swayX;
+            return {
+                x: mt * mt * f.bx + 2 * mt * t * cx + t * t * tx,
+                y: mt * mt * f.by + 2 * mt * t * f.cy + t * t * f.ty,
+            };
+        }
+
+        drawFlower(ctx, f, now, time) {
+            const age = now - f.born;
+            const grow = easeOutCubic(clamp01(age / f.growDur));
+            const swayX = Math.sin(time * 0.7 + f.swayPh) * (f.swayAmp * 300);
+
+            ctx.save();
+            ctx.strokeStyle = "#4e8f43";
+            ctx.lineCap = "round";
+            ctx.lineWidth = 3.2;
+            ctx.beginPath();
+            const steps = 8;
+            const p0 = this.bez(f, 0, swayX);
+            ctx.moveTo(p0.x, p0.y);
+            for (let i = 1; i <= steps; i++) {
+                const p = this.bez(f, (i / steps) * grow, swayX);
+                ctx.lineTo(p.x, p.y);
+            }
+            ctx.stroke();
+            ctx.strokeStyle = "rgba(150,235,140,0.35)";
+            ctx.lineWidth = 1.1;
+            ctx.stroke();
+            ctx.restore();
+
+            for (const lf of f.leaves) {
+                if (grow < lf.t + 0.05) continue;
+                const k = clamp01((grow - lf.t) / 0.28);
+                const p = this.bez(f, lf.t, swayX);
+                const pn = this.bez(f, Math.min(1, lf.t + 0.04), swayX);
+                const ang = Math.atan2(pn.y - p.y, pn.x - p.x);
+                const len = lf.len * easeOutCubic(k);
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(ang + lf.side * 0.85 + Math.sin(time * 0.8 + lf.t * 6) * 0.05);
+                ctx.fillStyle = "#4d8f3f";
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.quadraticCurveTo(len * 0.5, -len * 0.3, len, 0);
+                ctx.quadraticCurveTo(len * 0.5, len * 0.22, 0, 0);
+                ctx.fill();
+                ctx.strokeStyle = "rgba(190,255,170,0.35)";
+                ctx.lineWidth = 0.9;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.quadraticCurveTo(len * 0.5, -len * 0.06, len, 0);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            const bloomStart = f.growDur * 0.82;
+            if (age < bloomStart) return;
+            const b = clamp01((age - bloomStart) / f.bloomDur);
+            const scale = easeOutBack(b) * (f.size / SPRITE_BASE);
+            const head = this.bez(f, grow, swayX);
+            const img = this.headSprite(f.kind, f.pal);
+            const halfCss = img.width / (2 * this.dpr);
+            const r = halfCss * scale;
+            ctx.save();
+            ctx.globalAlpha = clamp01(b * 1.4);
+            ctx.translate(head.x, head.y);
+            ctx.rotate(f.spin * 0.4 + Math.sin(time * 0.6 + f.swayPh) * 0.05);
+            ctx.drawImage(img, -r, -r, r * 2, r * 2);
+            ctx.restore();
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    const canvas = document.getElementById("garden-canvas");
+    const hintText = document.getElementById("hint-text");
+    const engine = new GardenEngine(canvas);
+
+    let hintVisible = true;
+
+    engine.onPlant = () => {
+        if (hintVisible) {
+            hintVisible = false;
+            hintText.classList.add("faded");
+        }
+    };
+
+    engine.start();
+
+    window.addEventListener("resize", () => {
+        engine.resize();
+    });
+
+    const getPos = (e) => {
+        const rect = canvas.getBoundingClientRect();
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+
+        if (clientX === undefined && e.touches && e.touches.length > 0) {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        }
+
+        return {
+            x: clientX - rect.left,
+            y: clientY - rect.top,
+        };
+    };
+
+    canvas.addEventListener("pointermove", (e) => {
+        const p = getPos(e);
+        engine.trail(p.x, p.y);
+        if (e.buttons === 1) {
+            if (Math.random() < 0.06) engine.plant(p.x, p.y);
+        }
+    });
+
+    canvas.addEventListener("pointerdown", (e) => {
+        const p = getPos(e);
+        engine.plant(p.x, p.y);
+    });
+})();
